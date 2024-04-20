@@ -3,7 +3,7 @@ import sys
 import pygame
 
 from scripts.tilemap import Tilemap
-from scripts.utils import load_images
+from scripts.utils import load_images, load_image
 
 
 class Editor:
@@ -11,10 +11,18 @@ class Editor:
         pygame.init()
 
         pygame.display.set_caption('Editor')
-        self.screen = pygame.display.set_mode((640, 480))
-        self.display_width, self.display_height = (320, 240)
+
+        self.fullscreen = True
+        if self.fullscreen:
+            self.WIDTH, self.HEIGHT = pygame.display.Info().current_w, pygame.display.Info().current_h
+            self.render_scale = 4.0
+        else:
+            self.WIDTH, self.HEIGHT = 640, 480
+            self.render_scale = 2.0
+
+        self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
+        self.display_width, self.display_height = (self.WIDTH // self.render_scale, self.HEIGHT // self.render_scale)
         self.display = pygame.Surface((self.display_width, self.display_height))
-        self.render_scale = 2.0
 
         self.clock = pygame.time.Clock()
 
@@ -23,16 +31,21 @@ class Editor:
             'grass': load_images('tiles/grass'),
             'large_decor': load_images('tiles/large_decor'),
             'stone': load_images('tiles/stone'),
+            'spawners': load_images('tiles/spawners'),
         }
+
+        self.background = pygame.transform.scale(load_image('background.png'), (self.display_width, self.display_height))
 
         self.movement = [False, False, False, False]  # UP DOWN LEFT RIGHT
 
         self.tilemap = Tilemap(self, tile_size=16)
 
+        self.level = 4
+
         try:
-            self.tilemap.load('map.json')
+            self.tilemap.load(f'data/maps/{self.level}.json')
         except FileNotFoundError:
-            print('Map not Found')
+            print('Map was not Found')
 
         self.scroll = [-100, 0]
 
@@ -50,10 +63,12 @@ class Editor:
         self.rotation = 0
         self.keep_rotating = False
 
+        self.font = pygame.font.SysFont('monospace', 8, True, False)
+
     def run(self):
 
         while True:
-            self.display.fill((0, 0, 0))
+            self.display.blit(self.background, (0, 0))
 
             self.scroll[0] += (self.movement[1] - self.movement[0]) * 2
             self.scroll[1] += (self.movement[3] - self.movement[2]) * 2
@@ -68,11 +83,19 @@ class Editor:
             current_tile_img = pygame.transform.rotate(current_tile_img, self.rotation)
             current_tile_img.set_alpha(125)
 
+            # if a spawner is currently selected then reset all tile settings
+            if self.tile_group == 4:
+                self.ongrid = False
+                self.ongrid_hover_mode = False
+                self.rotation = 0
+                self.keep_rotating = False
+
             mpos = pygame.mouse.get_pos()
             mpos = (mpos[0] // self.render_scale, mpos[1] // self.render_scale)
             tile_pos = (int((mpos[0] + self.scroll[0]) // self.tilemap.tile_size),
                         int((mpos[1] + self.scroll[1]) // self.tilemap.tile_size))
 
+            # drawing current tile at top left corner
             if self.ongrid:
                 pre_placed_tile_pos = (
                     tile_pos[0] * self.tilemap.tile_size - self.scroll[0],
@@ -80,6 +103,12 @@ class Editor:
                 self.display.blit(current_tile_img, pre_placed_tile_pos)
             else:
                 self.display.blit(current_tile_img, mpos)
+
+            # drawing current mouse position
+            mpos_place = f"XY={(mpos[0] + self.scroll[0], mpos[1] + self.scroll[1])} TILE={tile_pos}"
+            mpos_text_surf = self.font.render(mpos_place, True, (255, 255, 255))
+            mpos_text_rect = mpos_text_surf.get_rect(topright=self.display.get_rect().topright)
+            self.display.blit(mpos_text_surf, mpos_text_rect)
 
             if self.clicking and self.ongrid:
                 self.tilemap.tilemap[f"{tile_pos[0]};{tile_pos[1]}"] = {
@@ -132,10 +161,11 @@ class Editor:
                             self.tile_variant = (self.tile_variant - 1) % len(self.assets[self.tile_list[self.tile_group]])
                         if event.button == 5:
                             self.tile_variant = (self.tile_variant + 1) % len(self.assets[self.tile_list[self.tile_group]])
-                    if self.ctrl:
-                        if event.button == 4:
+                    elif self.ctrl:
+
+                        if event.button == 4 and self.render_scale < 10:
                             self.render_scale += 0.2
-                        elif event.button == 5:
+                        elif event.button == 5 and self.render_scale > 1.2:
                             self.render_scale -= 0.2
 
                         screen_width, screen_height = pygame.display.get_surface().get_size()
@@ -143,7 +173,8 @@ class Editor:
                         self.display_height = screen_height // self.render_scale
                         self.display = pygame.Surface((self.display_width, self.display_height))
 
-                        print(f'x={self.display_width} y={self.display_height} scale={self.render_scale}')
+                        new_size = (self.display_width, self.display_height)
+                        self.background = pygame.transform.scale(self.background, new_size)
                     else:
                         if event.button == 4:
                             self.tile_group = (self.tile_group - 1) % len(self.tile_list)
@@ -159,6 +190,9 @@ class Editor:
                         self.right_clicking = False
 
                 if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        pygame.quit()
+                        sys.exit()
                     if event.key == pygame.K_a:
                         self.movement[0] = True
                     if event.key == pygame.K_d:
@@ -174,7 +208,7 @@ class Editor:
                     if event.key == pygame.K_t:
                         self.tilemap.autotile()
                     if event.key == pygame.K_o:
-                        self.tilemap.save('map.json')
+                        self.tilemap.save(f'data/maps/{self.level}.json')
                     if event.key == pygame.K_r:
                         self.rotation = (self.rotation + 90) % 360
                     if event.key == pygame.K_e:
